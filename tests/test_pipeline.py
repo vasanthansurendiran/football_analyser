@@ -1,48 +1,44 @@
 import unittest
+import pandas as pd
 from pathlib import Path
 import sys
 
-# Dynamically add the 'src' directory to the system path so we can import our modules
+# Dynamically add the 'src' directory
 src_path = Path(__file__).parent.parent / "src"
 sys.path.append(str(src_path))
 
-from ingest import stream_player_data
-from processor import build_tactical_roster
+from ingest import load_and_clean_data
 
 class TestDataPipeline(unittest.TestCase):
     
     def setUp(self):
-        # Resolve the absolute path to our dataset for integration testing
         self.dataset_path = Path(__file__).parent.parent / "data" / "players.csv"
         
     def test_file_not_found_exception(self):
-        """TDD: Ensure our custom exception handling works for bad paths."""
+        """TDD: Ensure Pandas correctly raises an error for bad paths."""
         with self.assertRaises(FileNotFoundError):
-            # We wrap it in list() to force the generator to evaluate immediately
-            list(stream_player_data("fake_path_that_does_not_exist.csv"))
+            load_and_clean_data("fake_path_that_does_not_exist.csv")
             
-    def test_roster_data_integrity(self):
-        """TDD: Verify the processor outputs the correct data structures and types."""
-        # Note: To demonstrate pdb debugging for your assignment report, 
-        # uncomment the two lines below, run the test, and take a screenshot of your terminal.
+    def test_dataframe_integrity_and_scaling(self):
+        """TDD: Verify Pandas drops nulls, encodes categoricals, and returns a DataFrame."""
+        # UNCOMMENT THE TWO LINES BELOW FOR YOUR PDB DEBUGGING SCREENSHOT
         # import pdb
         # pdb.set_trace() 
         
-        roster = build_tactical_roster(self.dataset_path)
+        df = load_and_clean_data(self.dataset_path)
         
-        # Verify it returns a dictionary-like object (defaultdict)
-        self.assertIsInstance(roster, dict)
+        # 1. Verify we successfully built a Pandas DataFrame
+        self.assertIsInstance(df, pd.DataFrame)
         
-        # Verify our 4-1-2-3 key positions exist in the filtered output
-        self.assertIn('ST', roster)
-        self.assertIn('CB', roster)
-        self.assertIn('CDM', roster)
+        # 2. Verify Missing Data Handling (Should be 0 nulls in critical columns)
+        self.assertEqual(df['overall'].isnull().sum(), 0)
         
-        # Verify our dictionary comprehension correctly cast the stats to integers
-        if len(roster['ST']) > 0:
-            first_striker = roster['ST'][0]
-            self.assertIsInstance(first_striker['overall'], int)
-            self.assertIsInstance(first_striker['short_name'], str)
+        # 3. Verify Categorical Encoding worked (Right=1, Left=0)
+        self.assertIn(df['preferred_foot_encoded'].iloc[0], [0.0, 1.0])
+        
+        # 4. Verify Feature Scaling (Scaled values usually fall between -3 and 3, not 1-99)
+        # We test the first player's pace to ensure it was transformed
+        self.assertTrue(-4.0 <= df['pace'].iloc[0] <= 4.0)
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

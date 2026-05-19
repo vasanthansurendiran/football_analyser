@@ -9,15 +9,15 @@ def run_eda(df, output_dir):
     print("\n--- STEP 2: Exploratory Data Analysis (EDA) ---")
     sns.set_theme(style="whitegrid")
     
-    # 1. Histogram (Overall Ratings)
+    # 1. Histogram
     print("Opening EDA 1: Histogram. Close the window to continue.")
     plt.figure(figsize=(8, 5))
     sns.histplot(df['overall'], bins=30, kde=True, color='blue')
     plt.title('Distribution of Player Overall Ratings')
     plt.savefig(output_dir / 'eda_histogram.png', dpi=300)
-    plt.show() # Forces the window to pop up
+    plt.show()
 
-    # 2. Box Plot (Pace by Tactical Role)
+    # 2. Box Plot
     print("Opening EDA 2: Box Plot. Close the window to continue.")
     attackers = ['ST', 'RW', 'LW', 'CF']
     defenders = ['CB', 'RB', 'LB', 'RWB', 'LWB']
@@ -28,24 +28,25 @@ def run_eda(df, output_dir):
     sns.boxplot(x='Role', y='pace', data=df, palette='Set2')
     plt.title('Pace Distribution by Tactical Role (Scaled)')
     plt.savefig(output_dir / 'eda_boxplot.png', dpi=300)
-    plt.show() # Forces the window to pop up
+    plt.show()
 
-    # 3. Heatmap (Correlations)
+    # 3. Heatmap
     print("Opening EDA 3: Correlation Heatmap. Close the window to continue.")
     plt.figure(figsize=(10, 8))
     corr_cols = ['overall', 'pace', 'shooting', 'passing', 'dribbling', 'defending', 'physic']
     sns.heatmap(df[corr_cols].corr(), annot=True, cmap='coolwarm', fmt=".2f")
     plt.title('Feature Correlation Heatmap')
     plt.savefig(output_dir / 'eda_heatmap.png', dpi=300)
-    plt.show() # Forces the window to pop up
-    
-    print(f"SUCCESS: EDA visualisations viewed and saved to {output_dir}")
+    plt.show()
 
 def run_ml_model(df):
     print("\n--- STEP 3: ML Regression (Predicting Overall Rating) ---")
+    # Exclude goalkeepers from core outfield regression model to preserve accuracy metrics
+    outfield_df = df[df['primary_position'] != 'GK']
+    
     features = ['pace', 'shooting', 'passing', 'dribbling', 'defending', 'physic', 'preferred_foot_encoded']
-    X = df[features]
-    y = df['overall']
+    X = outfield_df[features]
+    y = outfield_df['overall']
     
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
     model = RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=-1)

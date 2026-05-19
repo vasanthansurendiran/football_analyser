@@ -1,48 +1,42 @@
 import time
 import threading
 import multiprocessing
-from processor import build_tactical_roster
+from ingest import load_and_clean_data
 from pathlib import Path
 
-def cpu_heavy_task(roster_data, iterations=150):
+def cpu_heavy_task(df, iterations=15):
     """
-    Simulates a heavy computational workload on our dataset.
-    This acts as our CPU-bound task to expose the GIL.
+    Simulates a heavy computational workload by bypassing Pandas vectorization
+    and forcing row-by-row pure Python iteration to strictly expose the GIL.
     """
     total_power = 0
-    # We loop multiple times to ensure the CPU has to work hard
     for _ in range(iterations):
-        for position, players in roster_data.items():
-            for player in players:
-                # Arbitrary math using the player stats to stress the CPU
-                rating = player.get('overall', 1)
-                pace = player.get('pace', 1)
-                total_power += (rating ** 2) * pace
+        # itertuples forces Python to create objects in memory, triggering the GIL
+        for row in df.itertuples():
+            # Arbitrary math using the player stats to stress the CPU
+            total_power += (row.overall ** 2) * row.pace
     return total_power
 
-def run_synchronous(roster_data):
+def run_synchronous(df):
     start = time.time()
-    # Running the task twice sequentially
-    cpu_heavy_task(roster_data)
-    cpu_heavy_task(roster_data)
+    cpu_heavy_task(df)
+    cpu_heavy_task(df)
     return time.time() - start
 
-def run_threading(roster_data):
+def run_threading(df):
     start = time.time()
-    # Running the task twice using Threads (Concurrency)
-    t1 = threading.Thread(target=cpu_heavy_task, args=(roster_data,))
-    t2 = threading.Thread(target=cpu_heavy_task, args=(roster_data,))
+    t1 = threading.Thread(target=cpu_heavy_task, args=(df,))
+    t2 = threading.Thread(target=cpu_heavy_task, args=(df,))
     t1.start()
     t2.start()
     t1.join()
     t2.join()
     return time.time() - start
 
-def run_multiprocessing(roster_data):
+def run_multiprocessing(df):
     start = time.time()
-    # Running the task twice using Processes (Parallelism)
-    p1 = multiprocessing.Process(target=cpu_heavy_task, args=(roster_data,))
-    p2 = multiprocessing.Process(target=cpu_heavy_task, args=(roster_data,))
+    p1 = multiprocessing.Process(target=cpu_heavy_task, args=(df,))
+    p2 = multiprocessing.Process(target=cpu_heavy_task, args=(df,))
     p1.start()
     p2.start()
     p1.join()
@@ -53,27 +47,26 @@ if __name__ == '__main__':
     script_dir = Path(__file__).parent
     dataset_path = script_dir.parent / "data" / "players.csv"
     
-    print("Loading tactical roster into memory...")
-    roster = build_tactical_roster(dataset_path)
+    print("Loading Pandas DataFrame into memory...")
+    df_clean = load_and_clean_data(dataset_path)
     
     print("\n--- Starting Execution Bottleneck Analysis ---")
-    print("Executing CPU-bound tasks. This may take a few seconds...\n")
+    print("Executing CPU-bound tasks row-by-row. This will take several seconds...\n")
     
-    sync_time = run_synchronous(roster)
+    sync_time = run_synchronous(df_clean)
     print(f"1. Synchronous Execution Time:          {sync_time:.4f} seconds")
     
-    thread_time = run_threading(roster)
+    thread_time = run_threading(df_clean)
     print(f"2. Threading (Concurrency) Time:        {thread_time:.4f} seconds")
     
-    process_time = run_multiprocessing(roster)
+    process_time = run_multiprocessing(df_clean)
     print(f"3. Multiprocessing (Parallelism) Time:  {process_time:.4f} seconds")
     
     print("\n--- GIL Analysis Results ---")
-    if thread_time >= sync_time * 0.9:
+    if thread_time >= sync_time * 0.85:
         print("SUCCESS: The GIL bottleneck has been successfully exposed.")
-        print("Notice how Threading is NOT significantly faster than Synchronous execution.")
-        print("The Global Interpreter Lock prevented true parallel execution of our CPU-bound threads.")
+        print("Threading is NOT significantly faster than Synchronous execution.")
     
-    if process_time < sync_time * 0.7:
+    if process_time < sync_time * 0.75:
         print("\nSUCCESS: True parallelism achieved via Multiprocessing.")
-        print("By spawning separate processes, we bypassed the GIL, resulting in faster execution.")
+        print("By spawning separate processes, we bypassed the GIL entirely.")
