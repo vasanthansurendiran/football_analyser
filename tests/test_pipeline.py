@@ -25,8 +25,8 @@ class TestDataPipeline(unittest.TestCase):
         """TDD: Verify the processor outputs the correct data structures and types."""
         # Note: To demonstrate pdb debugging for your assignment report, 
         # uncomment the two lines below, run the test, and take a screenshot of your terminal.
-        import pdb
-        pdb.set_trace() 
+        # import pdb
+        # pdb.set_trace() 
         
         roster = build_tactical_roster(self.dataset_path)
         

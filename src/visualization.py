@@ -1,106 +1,67 @@
 import matplotlib
-matplotlib.use('Qt5Agg') 
+matplotlib.use('Qt5Agg')
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from sklearn.cluster import KMeans
-from processor import build_tactical_roster
 from pathlib import Path
 
-# --- 1. 3D Clustering Function ---
-def generate_tactical_cluster(roster_data, positions, stats, title, output_filename):
-    print(f"\n--- Extracting profiles for {positions} ---")
-    players = []
-    for pos in positions:
-        players.extend(roster_data.get(pos, []))
-        
-    valid_players = [p for p in players if all(k in p for k in (stats[0], stats[1], stats[2], 'overall'))]
-    elite_players = [p for p in valid_players if p['overall'] > 75]
+from ingest import load_and_clean_data
+from processor import run_eda, run_ml_model
+
+def generate_tactical_cluster(df, positions, stats, title, output_path):
+    print(f"\n--- Generating 3D Plot: {title} ---")
+    subset = df[(df['primary_position'].isin(positions))].copy()
     
-    if not elite_players:
-        print("Not enough elite players for clustering.")
+    if len(subset) < 3:
+        print("Insufficient positional data for clustering.")
         return
 
-    X = [[p[stats[0]], p[stats[1]], p[stats[2]]] for p in elite_players]
-    names = [p['short_name'] for p in elite_players]
-    
-    print(f"Applying K-Means clustering on {len(elite_players)} elite players...")
+    X = subset[[stats[0], stats[1], stats[2]]]
     kmeans = KMeans(n_clusters=3, random_state=42, n_init='auto')
-    clusters = kmeans.fit_predict(X)
+    subset['cluster'] = kmeans.fit_predict(X)
     
     fig = plt.figure(figsize=(10, 8))
     ax = fig.add_subplot(111, projection='3d')
-    ax.scatter([x[0] for x in X], [x[1] for x in X], [x[2] for x in X], 
-               c=clusters, cmap='viridis', s=40, alpha=0.8, edgecolors='k')
+    ax.scatter(subset[stats[0]], subset[stats[1]], subset[stats[2]], 
+               c=subset['cluster'], cmap='viridis', s=40, alpha=0.8, edgecolors='k')
     
     ax.set_title(title, fontsize=14)
-    ax.set_xlabel(stats[0].capitalize())
-    ax.set_ylabel(stats[1].capitalize())
-    ax.set_zlabel(stats[2].capitalize())
+    ax.set_xlabel(f"Scaled {stats[0].capitalize()}")
+    ax.set_ylabel(f"Scaled {stats[1].capitalize()}")
+    ax.set_zlabel(f"Scaled {stats[2].capitalize()}")
     
-    # Label top 5 absolute highest rated players in this line
-    elite_sorted = sorted(elite_players, key=lambda x: x['overall'], reverse=True)[:5]
-    top_names = [p['short_name'] for p in elite_sorted]
-    for i, name in enumerate(names):
-        if name in top_names:
-            ax.text(X[i][0], X[i][1], X[i][2], name, fontsize=9, fontweight='bold')
+    top_players = subset.sort_values(by='overall', ascending=False).head(3)
+    for _, row in top_players.iterrows():
+        ax.text(row[stats[0]], row[stats[1]], row[stats[2]], row['short_name'], fontsize=9, fontweight='bold')
     
     plt.tight_layout()
-    output_path = Path(__file__).parent.parent / output_filename
     plt.savefig(output_path, dpi=300)
-    print(f"SUCCESS: Image saved to {output_path}. Close the window to continue to the next step.")
+    print("Window opened. Close the interactive window to proceed.")
     plt.show()
 
+def draw_tactical_pitch(output_path):
+    print("\n--- Assembling the Final 4-1-2-3 Legend XI ---")
+    
+    # Enforce specified legend lineup names and historical ratings directly
+    team = {
+        'ST': "Ronaldo\nOVR: 94",
+        'LW': "Neymar\nOVR: 91",
+        'RW': "Messi\nOVR: 94",
+        'AMF': "Iniesta\nOVR: 91",
+        'CM': "Xavi\nOVR: 92",
+        '專MF': "F. Rijkaard\nOVR: 91", # Labeled as DMF dynamically on coordinates
+        'LB': "Maldini\nOVR: 94",
+        'CB1': "F. Beckenbauer\nOVR: 93",
+        'CB2': "A. Nesta\nOVR: 94",
+        'RB': "Lahm\nOVR: 89",
+        'GK': "Buffon\nOVR: 92"
+    }
 
-# --- 2. Ultimate XI Pitch Function ---
-def get_unique_top_players(roster, position, selected_names, count=1):
-    """Sorts players and ensures NO DUPLICATES are drafted."""
-    if position not in roster: return ["N/A"] * count if count > 1 else "N/A"
-    
-    sorted_players = sorted(roster[position], key=lambda x: x.get('overall', 0), reverse=True)
-    chosen = []
-    
-    for p in sorted_players:
-        if p['short_name'] not in selected_names:
-            chosen.append(p)
-            selected_names.add(p['short_name']) # Add to blacklist
-            if len(chosen) == count:
-                break
-                
-    if count == 1:
-        return f"{chosen[0]['short_name']}\nOVR: {chosen[0]['overall']}" if chosen else "N/A"
-    else:
-        results = [f"{p['short_name']}\nOVR: {p['overall']}" for p in chosen]
-        while len(results) < count: results.append("N/A")
-        return results
-
-def draw_tactical_pitch(roster_data):
-    print("\n--- Assembling the Ultimate 4-1-2-3 Quick Counter XI ---")
-    
-    # Global tracking set to prevent duplicates across the entire team
-    drafted_players = set()
-    
-    team = {}
-    # Attack
-    team['ST'] = get_unique_top_players(roster_data, 'ST', drafted_players)
-    team['LW'] = get_unique_top_players(roster_data, 'LW', drafted_players)
-    team['RW'] = get_unique_top_players(roster_data, 'RW', drafted_players)
-    # Midfield
-    team['CAM'] = get_unique_top_players(roster_data, 'CAM', drafted_players)
-    team['CM'] = get_unique_top_players(roster_data, 'CM', drafted_players)
-    team['CDM'] = get_unique_top_players(roster_data, 'CDM', drafted_players)
-    # Defense
-    cbs = get_unique_top_players(roster_data, 'CB', drafted_players, count=2)
-    team['CB1'], team['CB2'] = cbs[0], cbs[1]
-    team['LB'] = get_unique_top_players(roster_data, 'LB', drafted_players)
-    team['RB'] = get_unique_top_players(roster_data, 'RB', drafted_players)
-    team['GK'] = get_unique_top_players(roster_data, 'GK', drafted_players)
-
-    # Pitch Generation
     fig, ax = plt.subplots(figsize=(8, 12))
     ax.set_facecolor('#2E8B57') 
     fig.patch.set_facecolor('#1a1a1a') 
 
-    # Field Lines
+    # Field Boundary and Line Markings
     plt.plot([0, 0, 100, 100, 0], [0, 100, 100, 0, 0], color="white", linewidth=2) 
     plt.plot([0, 100], [50, 50], color="white", linewidth=2) 
     ax.add_patch(patches.Circle((50, 50), 12, fill=False, color="white", linewidth=2))
@@ -110,44 +71,47 @@ def draw_tactical_pitch(roster_data):
     plt.plot([36, 36, 64, 64], [100, 94, 94, 100], color="white", linewidth=2)
     plt.plot([36, 36, 64, 64], [0, 6, 6, 0], color="white", linewidth=2)
 
-    # 4-1-2-3 Coordinates
     coords = {
         'ST': (50, 88), 'LW': (20, 80), 'RW': (80, 80),
-        'CAM': (35, 65), 'CM': (65, 65),
-        'CDM': (50, 48),
+        'AMF': (35, 65), 'CM': (65, 65), '專MF': (50, 48),
         'LB': (15, 25), 'CB1': (35, 20), 'CB2': (65, 20), 'RB': (85, 25),
         'GK': (50, 5)
     }
 
     box_style = dict(boxstyle="round,pad=0.5", facecolor="#FFD700", edgecolor="black", linewidth=1.5)
-    
     for pos, (x, y) in coords.items():
         ax.text(x, y, team[pos], ha="center", va="center", fontsize=10, fontweight='bold', color="black", bbox=box_style, zorder=5)
 
-    ax.set_title("Optimal 4-1-2-3 Quick Counter XI", color="white", fontsize=16, fontweight='bold', pad=20)
+    ax.set_title("Optimal 4-1-2-3 Legend XI", color="white", fontsize=16, fontweight='bold', pad=20)
     ax.set_xlim(-5, 105)
     ax.set_ylim(-5, 105)
     ax.axis('off') 
     
-    output_path = Path(__file__).parent.parent / "final_optimal_xi.png"
     plt.savefig(output_path, dpi=300, bbox_inches='tight', facecolor=fig.get_facecolor())
-    print(f"SUCCESS: Final XI image saved to {output_path}")
+    print("Final Legend XI field layout rendered.")
     plt.show()
 
-# --- 3. Master Execution Sequence ---
 if __name__ == "__main__":
-    dataset_path = Path(__file__).parent.parent / "data" / "players.csv"
-    print("Loading tactical roster into memory...")
-    roster = build_tactical_roster(dataset_path)
+    script_dir = Path(__file__).parent
+    dataset_path = script_dir.parent / "data" / "players.csv"
+    output_dir = script_dir.parent
     
-    # Step 1: Attackers
-    generate_tactical_cluster(roster, ['ST', 'RW', 'LW'], ['pace', 'shooting', 'dribbling'], '4-1-2-3 Attackers', 'tactical_attackers.png')
+    # Pipeline execution sequence
+    df_clean = load_and_clean_data(dataset_path)
+    run_eda(df_clean, output_dir)
+    run_ml_model(df_clean)
     
-    # Step 2: Midfielders
-    generate_tactical_cluster(roster, ['CDM', 'CM', 'CAM'], ['passing', 'dribbling', 'defending'], '4-1-2-3 Midfield', 'tactical_midfielders.png')
-    
-    # Step 3: Defenders
-    generate_tactical_cluster(roster, ['CB', 'RB', 'LB'], ['defending', 'physic', 'pace'], '4-1-2-3 Defense', 'tactical_defenders.png')
-    
-    # Step 4: Final Pitch Diagram
-    draw_tactical_pitch(roster)
+    # Sequential visualization rendering
+    generate_tactical_cluster(df_clean, ['ST', 'RW', 'LW', 'CF'], ['pace', 'shooting', 'dribbling'], 
+                              '4-1-2-3 Attackers', output_dir / 'tactical_attackers_3d.png')
+                              
+    generate_tactical_cluster(df_clean, ['CDM', 'CM', 'CAM'], ['passing', 'dribbling', 'defending'], 
+                              '4-1-2-3 Midfield', output_dir / 'tactical_midfielders_3d.png')
+                              
+    generate_tactical_cluster(df_clean, ['CB', 'RB', 'LB', 'RWB', 'LWB'], ['defending', 'physic', 'pace'], 
+                              '4-1-2-3 Defense', output_dir / 'tactical_defenders_3d.png')
+                              
+    generate_tactical_cluster(df_clean, ['GK'], ['overall', 'defending', 'physic'], 
+                              'Goalkeeper Distribution Cluster', output_dir / 'tactical_goalkeepers_3d.png')
+                              
+    draw_tactical_pitch(output_dir / 'final_optimal_xi.png')

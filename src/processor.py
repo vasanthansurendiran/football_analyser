@@ -1,61 +1,56 @@
-from collections import defaultdict
-from ingest import stream_player_data
-from pathlib import Path
+import matplotlib.pyplot as plt
+import seaborn as sns
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_squared_error
 
-def build_tactical_roster(filepath):
-    """
-    Consumes the generator, filters for a 4-1-2-3 formation, 
-    and uses advanced collections/comprehensions to structure the data.
-    """
-    # ADVANCED COLLECTION: defaultdict prevents KeyError and auto-creates lists
-    roster = defaultdict(list)
+def run_eda(df, output_dir):
+    print("\n--- STEP 2: Exploratory Data Analysis (EDA) ---")
+    sns.set_theme(style="whitegrid")
     
-    # Target positions for a 4-1-2-3 (GK, CB, LB, RB, CDM, CM, CAM, RW, LW, ST, CF)
-    target_positions = {'CB', 'RB', 'LB', 'CDM', 'CM', 'CAM', 'RW', 'LW', 'ST', 'CF', 'GK'}
-    
-    # Instantiate our memory-efficient generator
-    player_stream = stream_player_data(filepath)
-    
-    # We only want these specific tactical stats for our ML clustering later
-    stats_of_interest = ['short_name', 'overall', 'pace', 'shooting', 'passing', 'dribbling', 'defending', 'physic']
-    
-    for player in player_stream:
-        # EA datasets often comma-separate positions (e.g., "RW, ST, CF"). Grab the primary.
-        raw_positions = player.get('player_positions', '').split(',')
-        primary_position = raw_positions[0].strip()
-        
-        if primary_position in target_positions:
-            try:
-                # COMPREHENSION: Dictionary comprehension to dynamically build the player profile
-                # We cast stats to integers for analysis, but leave the name as a string
-                cleaned_player = {
-                    key: int(player[key]) if key != 'short_name' else player[key]
-                    for key in stats_of_interest if player.get(key)
-                }
-                
-                # Add the position and append to our advanced collection
-                cleaned_player['position'] = primary_position
-                roster[primary_position].append(cleaned_player)
-                
-            except ValueError:
-                # If a stat is blank or broken (e.g., Goalkeepers don't have 'pace'), skip casting
-                continue
-                
-    return roster
+    # 1. Histogram (Overall Ratings)
+    print("Opening EDA 1: Histogram. Close the window to continue.")
+    plt.figure(figsize=(8, 5))
+    sns.histplot(df['overall'], bins=30, kde=True, color='blue')
+    plt.title('Distribution of Player Overall Ratings')
+    plt.savefig(output_dir / 'eda_histogram.png', dpi=300)
+    plt.show() # Forces the window to pop up
 
-if __name__ == "__main__":
-    script_dir = Path(__file__).parent
-    dataset_path = script_dir.parent / "data" / "players.csv"
+    # 2. Box Plot (Pace by Tactical Role)
+    print("Opening EDA 2: Box Plot. Close the window to continue.")
+    attackers = ['ST', 'RW', 'LW', 'CF']
+    defenders = ['CB', 'RB', 'LB', 'RWB', 'LWB']
+    df['Role'] = np.where(df['primary_position'].isin(attackers), 'Attacker',
+                 np.where(df['primary_position'].isin(defenders), 'Defender', 'Midfielder'))
     
-    print("Executing Tactical Roster Filter...")
-    tactical_roster = build_tactical_roster(dataset_path)
+    plt.figure(figsize=(8, 5))
+    sns.boxplot(x='Role', y='pace', data=df, palette='Set2')
+    plt.title('Pace Distribution by Tactical Role (Scaled)')
+    plt.savefig(output_dir / 'eda_boxplot.png', dpi=300)
+    plt.show() # Forces the window to pop up
+
+    # 3. Heatmap (Correlations)
+    print("Opening EDA 3: Correlation Heatmap. Close the window to continue.")
+    plt.figure(figsize=(10, 8))
+    corr_cols = ['overall', 'pace', 'shooting', 'passing', 'dribbling', 'defending', 'physic']
+    sns.heatmap(df[corr_cols].corr(), annot=True, cmap='coolwarm', fmt=".2f")
+    plt.title('Feature Correlation Heatmap')
+    plt.savefig(output_dir / 'eda_heatmap.png', dpi=300)
+    plt.show() # Forces the window to pop up
     
-    # Verify the sorting worked by checking a few key positions for our 4-1-2-3
-    for pos in ['ST', 'CDM', 'CB']:
-        player_count = len(tactical_roster[pos])
-        print(f"\nFound {player_count} players for position: {pos}")
-        
-        if player_count > 0:
-            # Sort to find the highest-rated player at this position
-            top_player = sorted(tactical_roster[pos], key=lambda x: x.get('overall', 0), reverse=True)[0]
-            print(f"  Top Tactical Option: {top_player['short_name']} (OVR: {top_player['overall']})")
+    print(f"SUCCESS: EDA visualisations viewed and saved to {output_dir}")
+
+def run_ml_model(df):
+    print("\n--- STEP 3: ML Regression (Predicting Overall Rating) ---")
+    features = ['pace', 'shooting', 'passing', 'dribbling', 'defending', 'physic', 'preferred_foot_encoded']
+    X = df[features]
+    y = df['overall']
+    
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    model = RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=-1)
+    model.fit(X_train, y_train)
+    
+    predictions = model.predict(X_test)
+    rmse = np.sqrt(mean_squared_error(y_test, predictions))
+    print(f"- Root Mean Square Error (RMSE): {rmse:.4f}")
